@@ -1,0 +1,23 @@
+{
+  "name": "pi-glean-mcp",
+  "version": "0.1.0",
+  "description": "Bridge Glean MCP server tools into Pi with configurable server URL and auto-connect.",
+  "license": "MIT",
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "files": [
+    "index.ts",
+    "README.md"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.4",
+    "mcp-remote": "0.1.38"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}
