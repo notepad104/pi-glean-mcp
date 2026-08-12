@@ -31,7 +31,7 @@ You can also choose scope:
 
 ## Commands
 
-- `/glean <message>` — explicitly call Glean chat through MCP
+- `/glean <message>` — explicitly call the Glean MCP chat tool (`glean_chat`) and return the raw response in-session
 - `/glean-setup <serverUrl> [global|project]` — save URL and enable auto-connect
 - `/glean-connect` — connect now and register tools
 - `/glean-reconnect` — reconnect and refresh tools
@@ -48,3 +48,11 @@ You can also choose scope:
 - Project override: `.pi/glean-mcp.json`
 - Registered tools are prefixed as `glean_<toolName>`
 - `glean_chat` is always registered as the canonical chat entry point
+
+### /glean usage
+
+```text
+/glean summarize the latest Android TV playback incidents from the last week
+```
+
+This hook directly invokes the MCP chat tool and prints the tool output back to the session.
