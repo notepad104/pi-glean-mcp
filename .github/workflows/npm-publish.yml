@@ -7,9 +7,10 @@ on:
 
 jobs:
   publish:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       id-token: write
 
     steps:
@@ -26,7 +27,70 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Publish to npm
-        run: npm publish --access public --provenance
+      - name: Resolve publish version
+        id: version
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const cp = require('node:child_process');
+
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const name = pkg.name;
+          let target = pkg.version;
+
+          function exists(version) {
+            try {
+              cp.execSync(`npm view ${name}@${version} version`, { stdio: 'pipe' });
+              return true;
+            } catch {
+              return false;
+            }
+          }
+
+          function bumpPatch(version) {
+            const m = version.match(/^(\d+)\.(\d+)\.(\d+)$/);
+            if (!m) {
+              throw new Error(`Version ${version} is not simple semver x.y.z`);
+            }
+            return `${m[1]}.${m[2]}.${Number(m[3]) + 1}`;
+          }
+
+          const original = target;
+          let bumped = false;
+
+          while (exists(target)) {
+            target = bumpPatch(target);
+            bumped = true;
+          }
+
+          if (bumped) {
+            cp.execSync(`npm version ${target} --no-git-tag-version`, {
+              stdio: 'inherit',
+            });
+          }
+
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `package_name=${name}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `target_version=${target}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `bumped=${bumped}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `original_version=${original}\n`);
+          NODE
+
+      - name: Commit version bump
+        if: steps.version.outputs.bumped == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore: bump version to ${{ steps.version.outputs.target_version }} [skip ci]"
+          git push
+
+      - name: Publish to npm (skip if already published)
+        run: |
+          if npm view "${{ steps.version.outputs.package_name }}@${{ steps.version.outputs.target_version }}" version >/dev/null 2>&1; then
+            echo "Version already exists on npm. Skipping publish."
+            exit 0
+          fi
+
+          npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
