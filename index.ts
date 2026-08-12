@@ -179,7 +179,7 @@ export default function gleanMcpExtension(pi: ExtensionAPI) {
         stderr: "pipe",
       });
 
-      const c = new Client({ name: "pi-glean-agent", version: "0.2.0" }, { capabilities: {} });
+      const c = new Client({ name: "pi-glean-mcp", version: "0.2.0" }, { capabilities: {} });
       ctx.ui.notify(`Connecting to Glean MCP: ${serverUrl}`, "info");
       await c.connect(transport);
 

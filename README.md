@@ -1,11 +1,11 @@
-# pi-glean-agent
+# pi-glean-mcp
 
 Pi extension that bridges a Glean MCP server into Pi tools.
 
 ## Install
 
 ```bash
-pi install npm:pi-glean-agent
+pi install npm:pi-glean-mcp
 ```
 
 ## Configure
