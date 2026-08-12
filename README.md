@@ -14,7 +14,9 @@ Get your Glean MCP URL from:
 
 - https://app.glean.com/settings/connected-apps
 
-Then in Pi:
+On first session start, the extension will ask for the server URL if it is not configured yet.
+
+You can also configure it manually:
 
 ```text
 /glean-setup https://<your-glean-host>/mcp/default
@@ -38,7 +40,9 @@ You can also choose scope:
 
 ## Behavior
 
-- Auto-connects on session start when `autoConnect=true`
+- No default server URL is baked in.
+- On first initialization (when URL is missing), it prompts for server URL in TUI.
+- Auto-connects on session start when `autoConnect=true` and URL is configured.
 - Global config: `~/.pi/agent/glean-mcp.json`
 - Project override: `.pi/glean-mcp.json`
 - Registered tools are prefixed as `glean_<toolName>`

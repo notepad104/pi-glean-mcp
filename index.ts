@@ -8,7 +8,6 @@ import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 
-const DEFAULT_SERVER_URL = "https://crunchyroll-be.glean.com/mcp/default";
 const TOOL_PREFIX = "glean_";
 const TOOL_NAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const CONFIG_FILE_NAME = "glean-mcp.json";
@@ -23,14 +22,13 @@ interface McpToolDef {
 }
 
 interface Config {
-  serverUrl: string;
+  serverUrl?: string;
   autoConnect: boolean;
 }
 
 type ConfigScope = "global" | "project";
 
 const DEFAULT_CONFIG: Config = {
-  serverUrl: DEFAULT_SERVER_URL,
   autoConnect: true,
 };
 
@@ -63,9 +61,9 @@ async function readConfig(path: string): Promise<Config | undefined> {
     throw new Error(`${path} is not valid JSON: ${(err as Error).message}`);
   }
 
-  const serverUrl = typeof parsed.serverUrl === "string" ? parsed.serverUrl.trim() : DEFAULT_SERVER_URL;
+  const rawServerUrl = typeof parsed.serverUrl === "string" ? parsed.serverUrl.trim() : "";
   return {
-    serverUrl: isValidServerUrl(serverUrl) ? serverUrl : DEFAULT_SERVER_URL,
+    serverUrl: isValidServerUrl(rawServerUrl) ? rawServerUrl : undefined,
     autoConnect: parsed.autoConnect !== false,
   };
 }
@@ -251,7 +249,41 @@ export default function gleanMcpExtension(pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     try {
-      const { config } = await loadEffectiveConfig(ctx.cwd, ctx.isProjectTrusted());
+      const trusted = ctx.isProjectTrusted();
+      const { config, scope } = await loadEffectiveConfig(ctx.cwd, trusted);
+
+      if (!config.serverUrl) {
+        if (ctx.hasUI) {
+          const entered = await ctx.ui.input(
+            "Glean MCP server URL",
+            "Paste URL from https://app.glean.com/settings/connected-apps",
+          );
+          const serverUrl = entered?.trim() ?? "";
+          if (isValidServerUrl(serverUrl)) {
+            const initialized: Config = {
+              serverUrl,
+              autoConnect: config.autoConnect,
+            };
+            await saveConfig(scope, ctx.cwd, initialized);
+            ctx.ui.notify(`Saved Glean MCP config (${scope}).`, "info");
+            if (initialized.autoConnect) {
+              await discoverAndRegister(serverUrl, ctx);
+            }
+          } else {
+            ctx.ui.notify(
+              "Glean MCP not configured. Run /glean-setup <serverUrl> after you get the URL from https://app.glean.com/settings/connected-apps",
+              "warning",
+            );
+          }
+        } else {
+          ctx.ui.notify(
+            "Glean MCP not configured. Run /glean-setup <serverUrl> in TUI using URL from https://app.glean.com/settings/connected-apps",
+            "warning",
+          );
+        }
+        return;
+      }
+
       if (!config.autoConnect) return;
       await discoverAndRegister(config.serverUrl, ctx);
     } catch (err) {
@@ -306,6 +338,10 @@ export default function gleanMcpExtension(pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       try {
         const { config } = await loadEffectiveConfig(ctx.cwd, ctx.isProjectTrusted());
+        if (!config.serverUrl) {
+          ctx.ui.notify("Glean MCP not configured. Run /glean-setup <serverUrl>", "warning");
+          return;
+        }
         await discoverAndRegister(config.serverUrl, ctx);
       } catch (err) {
         ctx.ui.notify(`Glean MCP connect failed: ${(err as Error).message}`, "error");
@@ -353,6 +389,10 @@ export default function gleanMcpExtension(pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       try {
         const { config } = await loadEffectiveConfig(ctx.cwd, ctx.isProjectTrusted());
+        if (!config.serverUrl) {
+          ctx.ui.notify("Glean MCP not configured. Run /glean-setup <serverUrl>", "warning");
+          return;
+        }
         await closeClient();
         await discoverAndRegister(config.serverUrl, ctx);
       } catch (err) {
@@ -366,7 +406,8 @@ export default function gleanMcpExtension(pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       try {
         const { config, scope } = await loadEffectiveConfig(ctx.cwd, ctx.isProjectTrusted());
-        ctx.ui.notify(`Glean config (${scope}): autoConnect=${String(config.autoConnect)}, url=${config.serverUrl}`, "info");
+        const url = config.serverUrl ?? "<not configured>";
+        ctx.ui.notify(`Glean config (${scope}): autoConnect=${String(config.autoConnect)}, url=${url}`, "info");
       } catch (err) {
         ctx.ui.notify(`Failed to read Glean config: ${(err as Error).message}`, "error");
       }
