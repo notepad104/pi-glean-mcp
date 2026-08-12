@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "description": "Bridge Glean MCP server tools into Pi with configurable server URL and auto-connect.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/notepad104/pi-glean-mcp"
+  },
+  "homepage": "https://github.com/notepad104/pi-glean-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/notepad104/pi-glean-mcp/issues"
+  },
   "type": "module",
   "pi": {
     "extensions": [
