@@ -11,6 +11,8 @@ import { homedir } from "node:os";
 const TOOL_PREFIX = "glean_";
 const TOOL_NAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const CONFIG_FILE_NAME = "glean-mcp.json";
+const CHAT_TOOL_NAME = "glean_chat";
+const CHAT_MCP_TOOL_CANDIDATES = ["chat", "glean_chat"];
 
 const GLOBAL_CONFIG_DIR = join(homedir(), CONFIG_DIR_NAME, "agent");
 const GLOBAL_CONFIG_PATH = join(GLOBAL_CONFIG_DIR, CONFIG_FILE_NAME);
@@ -125,6 +127,22 @@ function parseScope(input: string | undefined, trusted: boolean): ConfigScope | 
   return undefined;
 }
 
+function extractToolText(result: { content?: unknown; [key: string]: unknown }): string {
+  return Array.isArray(result.content)
+    ? result.content
+        .filter((part): part is { type: "text"; text: string } => {
+          return (
+            !!part &&
+            typeof part === "object" &&
+            (part as { type?: unknown }).type === "text" &&
+            typeof (part as { text?: unknown }).text === "string"
+          );
+        })
+        .map((part) => part.text)
+        .join("\n")
+    : JSON.stringify(result);
+}
+
 export default function gleanMcpExtension(pi: ExtensionAPI) {
   let client: Client | undefined;
   let clientUrl: string | undefined;
@@ -161,7 +179,7 @@ export default function gleanMcpExtension(pi: ExtensionAPI) {
         stderr: "pipe",
       });
 
-      const c = new Client({ name: "pi-glean-mcp", version: "0.2.0" }, { capabilities: {} });
+      const c = new Client({ name: "pi-glean-agent", version: "0.2.0" }, { capabilities: {} });
       ctx.ui.notify(`Connecting to Glean MCP: ${serverUrl}`, "info");
       await c.connect(transport);
 
@@ -202,6 +220,7 @@ export default function gleanMcpExtension(pi: ExtensionAPI) {
       if (!TOOL_NAME_PATTERN.test(tool.name)) continue;
 
       const name = toolNameFor(tool.name);
+      if (name === CHAT_TOOL_NAME) continue;
       if (registered.has(name) || pi.getAllTools().some((t) => t.name === name)) continue;
 
       pi.registerTool({
@@ -218,12 +237,7 @@ export default function gleanMcpExtension(pi: ExtensionAPI) {
             { signal },
           );
 
-          const text = Array.isArray(result.content)
-            ? result.content
-                .filter((part): part is { type: "text"; text: string } => part.type === "text")
-                .map((part) => part.text)
-                .join("\n")
-            : JSON.stringify(result);
+          const text = extractToolText(result as { content?: unknown; [key: string]: unknown });
 
           if (result.isError) {
             throw new Error(text || "Glean MCP tool call failed");
@@ -246,6 +260,112 @@ export default function gleanMcpExtension(pi: ExtensionAPI) {
 
     ctx.ui.notify(`Glean MCP ready (${added} new tools, ${gleanTools.length} active).`, "info");
   }
+
+  async function getConfiguredServerUrl(cwd: string, trusted: boolean): Promise<string> {
+    const { config } = await loadEffectiveConfig(cwd, trusted);
+    if (!config.serverUrl) {
+      throw new Error("Glean MCP not configured. Run /glean-setup <serverUrl>");
+    }
+    return config.serverUrl;
+  }
+
+  async function resolveChatMcpToolName(c: Client): Promise<string> {
+    const { tools } = await c.listTools();
+    for (const candidate of CHAT_MCP_TOOL_CANDIDATES) {
+      if ((tools as McpToolDef[]).some((tool) => tool.name === candidate)) {
+        return candidate;
+      }
+    }
+
+    const available = (tools as McpToolDef[]).map((tool) => tool.name).join(", ");
+    throw new Error(
+      `No chat tool exposed by Glean MCP server. Expected one of: ${CHAT_MCP_TOOL_CANDIDATES.join(", ")}. Available: ${available || "none"}`,
+    );
+  }
+
+  async function callGleanChat(
+    message: string,
+    context: string[],
+    ctx: { cwd: string; isProjectTrusted: () => boolean; ui: { notify: (msg: string, type?: "error" | "warning" | "info") => void } },
+  ): Promise<string> {
+    const serverUrl = await getConfiguredServerUrl(ctx.cwd, ctx.isProjectTrusted());
+    const c = await connect(serverUrl, ctx);
+    const chatTool = await resolveChatMcpToolName(c);
+
+    const argCandidates: Record<string, unknown>[] = [
+      { message, context },
+      { query: message, context },
+      { prompt: message, context },
+      { message },
+      { query: message },
+      { prompt: message },
+    ];
+
+    let lastError: Error | undefined;
+    for (const args of argCandidates) {
+      try {
+        const result = await c.callTool({ name: chatTool, arguments: args });
+        const text = extractToolText(result as { content?: unknown; [key: string]: unknown });
+        if ((result as { isError?: boolean }).isError) {
+          throw new Error(text || "Glean chat returned an error response");
+        }
+        return text || "(no output)";
+      } catch (err) {
+        lastError = err as Error;
+      }
+    }
+
+    throw new Error(lastError?.message ?? "Glean chat call failed");
+  }
+
+  pi.registerTool({
+    name: CHAT_TOOL_NAME,
+    label: "Glean Chat",
+    description: "AI-powered tool for company knowledge. Synthesizes information from multiple sources with intelligent analysis.",
+    parameters: {
+      type: "object",
+      required: ["message"],
+      properties: {
+        message: {
+          type: "string",
+          description: "The user question or message to send to Glean Assistant",
+        },
+        context: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional previous messages for context",
+        },
+      },
+      additionalProperties: false,
+    },
+    executionMode: "sequential",
+    async execute(_toolCallId, params) {
+      const message = typeof params.message === "string" ? params.message.trim() : "";
+      const context = Array.isArray(params.context)
+        ? params.context.filter((item): item is string => typeof item === "string")
+        : [];
+
+      if (!message) {
+        throw new Error("message must not be empty");
+      }
+
+      const output = await callGleanChat(message, context, {
+        cwd: process.cwd(),
+        isProjectTrusted: () => true,
+        ui: {
+          notify: () => {
+            // no-op in tool execution path
+          },
+        },
+      });
+
+      return {
+        content: [{ type: "text" as const, text: output || "(no output)" }],
+      };
+    },
+  });
+
+  registered.add(CHAT_TOOL_NAME);
 
   pi.on("session_start", async (_event, ctx) => {
     try {
@@ -345,6 +465,29 @@ export default function gleanMcpExtension(pi: ExtensionAPI) {
         await discoverAndRegister(config.serverUrl, ctx);
       } catch (err) {
         ctx.ui.notify(`Glean MCP connect failed: ${(err as Error).message}`, "error");
+      }
+    },
+  });
+
+  pi.registerCommand("glean", {
+    description: "Send a prompt to Glean chat through MCP",
+    handler: async (args, ctx) => {
+      const message = (args ?? "").trim();
+      if (!message) {
+        ctx.ui.notify("Usage: /glean <message>", "warning");
+        return;
+      }
+
+      try {
+        ctx.ui.notify("Querying Glean MCP chat...", "info");
+        const output = await callGleanChat(message, [], ctx);
+        pi.sendMessage({
+          customType: "glean-chat-result",
+          content: output,
+          display: true,
+        });
+      } catch (err) {
+        ctx.ui.notify(`Glean chat failed: ${(err as Error).message}`, "error");
       }
     },
   });

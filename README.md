@@ -1,11 +1,11 @@
-# pi-glean-mcp
+# pi-glean-agent
 
 Pi extension that bridges a Glean MCP server into Pi tools.
 
 ## Install
 
 ```bash
-pi install npm:pi-glean-mcp
+pi install npm:pi-glean-agent
 ```
 
 ## Configure
@@ -31,6 +31,7 @@ You can also choose scope:
 
 ## Commands
 
+- `/glean <message>` — explicitly call Glean chat through MCP
 - `/glean-setup <serverUrl> [global|project]` — save URL and enable auto-connect
 - `/glean-connect` — connect now and register tools
 - `/glean-reconnect` — reconnect and refresh tools
@@ -46,3 +47,4 @@ You can also choose scope:
 - Global config: `~/.pi/agent/glean-mcp.json`
 - Project override: `.pi/glean-mcp.json`
 - Registered tools are prefixed as `glean_<toolName>`
+- `glean_chat` is always registered as the canonical chat entry point
